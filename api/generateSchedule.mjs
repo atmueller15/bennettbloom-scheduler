@@ -17,7 +17,7 @@ export default async function handler(req, res) {
   const body = req.body;
   if (!body) {
     return res.status(400).json({ error: 'Empty body' });
-  }
+  
 
   const { startDate, endDate } = body;
 
@@ -153,7 +153,7 @@ function meetsRules(internName, doctorName, location, dayOfWeek, rules) {
     const rDoctor   = (rule.DoctorName  || '').trim();
     const rLocation = (rule.Location    || '').trim();
     const rDays     = (rule.DaysOfWeek  || '').split(',').map(d => d.trim()).filter(Boolean);
-    const rType     = (rule.RuleType    || 'Deny').trim();
+        const rType    = String(rule.RuleType || 'Deny').trim();
     if (
       (!rIntern   || rIntern   === internName)  &&
       (!rDoctor   || rDoctor   === doctorName)   &&
