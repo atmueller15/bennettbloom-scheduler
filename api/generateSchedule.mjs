@@ -17,7 +17,7 @@ export default async function handler(req, res) {
   const body = req.body;
   if (!body) {
     return res.status(400).json({ error: 'Empty body' });
-  
+  }
 
   const { startDate, endDate } = body;
 
@@ -49,7 +49,12 @@ export default async function handler(req, res) {
     const schedule = generateSchedule({
       startDate: new Date(startDate),
       endDate:   new Date(endDate),
-      interns, doctorLocations, blackouts, assignmentRules, timeOff, clinicSwitches
+      interns,
+      doctorLocations,
+      blackouts,
+      assignmentRules,
+      timeOff,
+      clinicSwitches
     });
     return res.status(200).json({ success: true, totalAssignments: schedule.length, schedule });
   } catch (err) {
@@ -58,12 +63,17 @@ export default async function handler(req, res) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Core Scheduling Algorithm
+// ─────────────────────────────────────────────────────────────────
+
 function generateSchedule({ startDate, endDate, interns, doctorLocations, blackouts, assignmentRules, timeOff, clinicSwitches }) {
   const assignments = [];
   const blackoutMap  = buildBlackoutMap(blackouts);
   const timeOffMap   = buildTimeOffMap(timeOff);
   const rulesMap     = assignmentRules;
   const switchMap    = buildSwitchMap(clinicSwitches);
+
   const internLocationCount = {};
   interns.forEach(i => { internLocationCount[i.Title] = {}; });
 
@@ -71,44 +81,63 @@ function generateSchedule({ startDate, endDate, interns, doctorLocations, blacko
     const dateStr      = formatDate(day);
     const doctorsToday = getDoctorsForDay(day, dateStr, doctorLocations, switchMap);
     if (doctorsToday.length === 0) continue;
+
     const available = interns.filter(i => !isOnTimeOff(i.Title, dateStr, timeOffMap));
     if (available.length === 0) continue;
+
     assignments.push(...assignInternsToLocations({
-      date: dateStr, dayOfWeek: day.getDay(), doctors: doctorsToday,
-      interns: available, blackoutMap, rulesMap, internLocationCount
+      date: dateStr,
+      dayOfWeek: day.getDay(),
+      doctors: doctorsToday,
+      interns: available,
+      blackoutMap,
+      rulesMap,
+      internLocationCount
     }));
   }
+
   return assignments;
 }
 
 function assignInternsToLocations({ date, dayOfWeek, doctors, interns, blackoutMap, rulesMap, internLocationCount }) {
-  const results = [];
+  const results      = [];
   const assignedToday = new Set();
+
   for (const slot of [...doctors].sort((a, b) => (a.Location || '').localeCompare(b.Location || ''))) {
     const { DoctorName, Location, MaxInterns = 1 } = slot;
     const slotsNeeded = parseInt(MaxInterns, 10) || 1;
     let filled = 0;
+
     const candidates = interns
       .filter(intern =>
         !assignedToday.has(intern.Title) &&
         !isBlackedOut(intern.Title, DoctorName, date, blackoutMap) &&
         meetsRules(intern.Title, DoctorName, Location, dayOfWeek, rulesMap)
       )
-      .map(intern => ({ intern, score: (internLocationCount[intern.Title] || {})[Location] || 0 }))
+      .map(intern => ({
+        intern,
+        score: (internLocationCount[intern.Title] || {})[Location] || 0
+      }))
       .sort((a, b) => a.score - b.score);
+
     for (const { intern } of candidates) {
       if (filled >= slotsNeeded) break;
       results.push({ Date: date, InternName: intern.Title, DoctorName, Location, Status: 'Assigned' });
-      internLocationCount[intern.Title][Location] = (internLocationCount[intern.Title][Location] || 0) + 1;
+      internLocationCount[intern.Title][Location] =
+        (internLocationCount[intern.Title][Location] || 0) + 1;
       assignedToday.add(intern.Title);
       filled++;
     }
+
     for (let i = filled; i < slotsNeeded; i++) {
       results.push({ Date: date, InternName: 'UNASSIGNED', DoctorName, Location, Status: 'Unassigned' });
     }
   }
+
   return results;
 }
+
+// ─── Lookup builders ────────────────────────────────────────────
 
 function buildBlackoutMap(blackouts) {
   const map = {};
@@ -153,12 +182,14 @@ function meetsRules(internName, doctorName, location, dayOfWeek, rules) {
     const rDoctor   = (rule.DoctorName  || '').trim();
     const rLocation = (rule.Location    || '').trim();
     const rDays     = (rule.DaysOfWeek  || '').split(',').map(d => d.trim()).filter(Boolean);
-        const rType    = String(rule.RuleType || 'Deny').trim();
+    const rType     = String(rule.RuleType || 'Deny').trim();
+
     if (
       (!rIntern   || rIntern   === internName)  &&
       (!rDoctor   || rDoctor   === doctorName)   &&
       (!rLocation || rLocation === location)     &&
-      (rDays.length === 0 || rDays.includes(String(dayOfWeek)) ||
+      (rDays.length === 0 ||
+       rDays.includes(String(dayOfWeek)) ||
        rDays.some(d => d.toLowerCase() === dayName(dayOfWeek).toLowerCase()))
     ) {
       if (rType === 'Deny') return false;
@@ -184,13 +215,20 @@ function getDoctorsForDay(day, dateStr, doctorLocations, switchMap) {
   const dow     = day.getDay();
   const dayAbbr = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dow];
   const result  = [];
+
   for (const dl of doctorLocations) {
     const activeDays = (dl.ActiveDays || '').split(',').map(d => d.trim()).filter(Boolean);
     const isActive   = activeDays.length === 0 ||
-                       activeDays.some(d => d === dayAbbr || d === String(dow) || d.toLowerCase() === dayName(dow).toLowerCase());
+                       activeDays.some(d =>
+                         d === dayAbbr ||
+                         d === String(dow) ||
+                         d.toLowerCase() === dayName(dow).toLowerCase()
+                       );
     if (!isActive) continue;
+
     const doctorName = (dl.DoctorName || dl.Title || '').trim();
     const sw         = switchMap[`${doctorName}|${dateStr}`];
+
     result.push({
       DoctorName: sw ? (sw.NewDoctorName || doctorName) : doctorName,
       Location:   sw ? sw.NewLocation : (dl.Location || ''),
@@ -199,6 +237,8 @@ function getDoctorsForDay(day, dateStr, doctorLocations, switchMap) {
   }
   return result;
 }
+
+// ─── Date utilities ──────────────────────────────────────────────
 
 function getWeekdays(start, end) {
   const days = [];
